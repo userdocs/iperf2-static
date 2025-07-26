@@ -1,0 +1,68 @@
+name: ci - check for new iperf release tag
+
+on:
+  workflow_call:
+    outputs:
+      continue_build:
+        value: ${{ jobs.check_release.outputs.continue_build }}
+      iperf_tag:
+        value: ${{ jobs.check_release.outputs.iperf_tag }}
+
+env:
+  GH_TOKEN: "${{ github.TOKEN }}"
+
+jobs:
+  check_release:
+    outputs:
+      continue_build: ${{ steps.continue_build_check.outputs.continue_build_choice }}
+      iperf_tag: ${{ steps.continue_build_check.outputs.iperf_tag }}
+    runs-on: ubuntu-24.04-arm
+
+    steps:
+      # Checkout the code
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Get latest iperf2 tag
+        run: |
+          iperf2="$(curl -sL https://sourceforge.net/projects/iperf2/best_release.json | jq -r '.platform_releases.linux.filename')"
+          iperf2_filename="${iperf2#/}"
+          iperf2_version="${iperf2_filename#iperf-}"
+          iperf2_version="${iperf2_version%\.tar\.gz}"
+          iperf2_branch="${iperf2_version//\./-}"
+
+          printf '%s\n' "upstream_iperf2_latest_release=${iperf2_version}" | tee -a $GITHUB_ENV | tee -a $GITHUB_STEP_SUMMARY
+
+          upstream_iperf2_master_tag="$(curl -sL https://sourceforge.net/p/iperf2/code/ci/master/tree/configure?format=raw | sed -rn "s|PACKAGE_VERSION='(.*)'|\1|p")"
+          printf '%s\n' "upstream_iperf2_master_tag=${upstream_iperf2_master_tag}" | tee -a $GITHUB_ENV | tee -a $GITHUB_STEP_SUMMARY
+
+      - name: Get latest ${{ github.repository }} tag
+        run: |
+          url_effective="$(curl -fLSI -o /dev/null -w "%{url_effective}" "https://github.com/${{ github.repository }}/releases/latest")"        
+          printf '%s\n' "local_iperf_tag=${url_effective##*/}" | tee -a $GITHUB_ENV | tee -a $GITHUB_STEP_SUMMARY
+
+      - name: Test values - latest upstream vs local tags
+        id: continue_build_check
+        run: |
+          ver() {
+            local test_array
+            read -ra test_array < <(printf "%s" "${@//./ }")
+            printf "%d%03d%03d%03d" "${test_array[@]}"
+          }
+
+          local_iperf_tag="${local_iperf_tag}"
+
+          # if master version is same as local tag, no need to continue
+          if [[ "${upstream_iperf2_master_tag}" != "${local_iperf_tag}" ]]; then        
+            if [[ "$(ver "${upstream_iperf2_latest_release}")" -gt "$(ver "${local_iperf_tag//+/}")" ]]; then
+              printf "%-14s remote:%-10s local:%-10s %s\n" "$iray" "${upstream_iperf2_latest_release}" "${local_iperf_tag//+/}" "< New version available - workflow will be triggered" | tee -a $GITHUB_STEP_SUMMARY
+              printf '%s\n' "continue_build_choice=yes" | tee -a $GITHUB_OUTPUT | tee -a $GITHUB_STEP_SUMMARY
+              printf '%s\n' "iperf_tag=${upstream_iperf2_latest_release}" | tee -a $GITHUB_OUTPUT | tee -a $GITHUB_STEP_SUMMARY
+            else
+              printf "%-14s remote:%-10s local:%-10s\n" "$iray" "${upstream_iperf2_latest_release}" "${local_iperf_tag//+/}" | tee -a $GITHUB_STEP_SUMMARY
+            fi
+          else
+            printf '\n%b\n\n' ">[!WARNING]\n> Skipping auto build as local tag is same as upstream master version" | tee -a $GITHUB_STEP_SUMMARY
+          fi 
