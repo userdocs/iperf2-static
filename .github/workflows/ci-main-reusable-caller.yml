@@ -1,0 +1,191 @@
+name: ci - main reusable caller
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_repo:
+        description: "Define the git repo used for the build"
+        required: true
+        default: "https://git.code.sf.net/p/iperf2/code"
+      source_branch:
+        description: "Specify the branch or tag to build"
+        required: true
+        default: "master"
+      skip_new_tag_check:
+        description: "Bypass new tag check to force build?"
+        required: true
+        default: false
+        type: boolean
+      artifacts_only:
+        description: "Skip release - artifacts only"
+        required: true
+        default: false
+        type: boolean
+      skip_rerun:
+        description: "Skip rerun?"
+        required: true
+        default: false
+        type: boolean
+      retries:
+        description: "Number of rerun retries"
+        required: true
+        default: "2"
+        type: choice
+        options: ["1", "2", "3", "4", "5", "6", "7", "8", "9"]
+
+  # schedule:
+  #   - cron: "*/5 * * * *" # every 5 minutes
+
+permissions: {}
+
+env:
+  GH_TOKEN: "${{ github.TOKEN }}"
+
+jobs:
+  skip_duplicate_job:
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      actions: write
+      contents: read
+    outputs:
+      should_skip: ${{ steps.skip_check.outputs.should_skip }}
+    steps:
+      - id: skip_check
+        uses: fkirc/skip-duplicate-actions@v5
+        with:
+          concurrent_skipping: "always"
+          cancel_others: "false"
+          skip_after_successful_duplicate: false
+          do_not_skip: ""
+
+  scheduled_defaults:
+    if: needs.skip_duplicate_job.outputs.should_skip != 'true'
+    needs: skip_duplicate_job
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+    outputs:
+      source_repo: ${{ github.event.inputs.source_repo || 'https://git.code.sf.net/p/iperf2/code' }}
+      source_branch: ${{ github.event.inputs.source_branch || 'master' }}
+      artifacts_only: ${{ github.event.inputs.artifacts_only || 'false' }}
+      skip_new_tag_check: ${{ github.event.inputs.skip_new_tag_check || 'false'  }}
+      skip_rerun: ${{ github.event.inputs.skip_rerun || 'false' }}
+      retries: ${{ github.event.inputs.retries || '1' }}
+    steps:
+      - name: Setting Outputs from inputs
+        run: |
+          printf '%b\n\n' "Setting Outputs from Inputs"
+
+          printf '%b\n\n' "Checking required secrets are set" >> $GITHUB_STEP_SUMMARY
+
+          if [[ -z "${{ secrets.VT_API_KEY }}" ]]; then
+            printf '%b\n\n' "VT_API_KEY is not set. Exiting..." >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+  show_outputs:
+    needs: ["skip_duplicate_job", "scheduled_defaults"]
+    if: needs.skip_duplicate_job.outputs.should_skip != 'true'
+    runs-on: ubuntu-24.04-arm
+    env:
+      source_repo: ${{ needs.scheduled_defaults.outputs.source_repo }}
+      source_branch: ${{ needs.scheduled_defaults.outputs.source_branch }}
+      artifacts_only: ${{ needs.scheduled_defaults.outputs.artifacts_only }}
+      skip_new_tag_check: ${{ needs.scheduled_defaults.outputs.skip_new_tag_check }}
+      skip_rerun: ${{ needs.scheduled_defaults.outputs.skip_rerun }}
+      retries: ${{ needs.scheduled_defaults.outputs.retries }}
+    steps:
+      - name: Set output
+        run: |
+          printf '%b\n' "# Scheduled Defaults Outputs Summary" >> $GITHUB_STEP_SUMMARY
+          printf '\n%b\n' ":octocat: Here is a summary of inputs set as string outputs that are used in workflows." >> $GITHUB_STEP_SUMMARY
+
+          printf '\n%b\n' "source_repo: \`${source_repo}\`" >> $GITHUB_STEP_SUMMARY
+          printf '\n%b\n' "source_branch: \`${source_branch}\`" >> $GITHUB_STEP_SUMMARY
+          printf '\n%b\n' "artifacts_only: \`${artifacts_only}\`" >> $GITHUB_STEP_SUMMARY
+          printf '\n%b\n' "skip_new_tag_check: \`${skip_new_tag_check}\`" >> $GITHUB_STEP_SUMMARY
+          printf '\n%b\n' "skip_rerun: \`${skip_rerun}\`" >> $GITHUB_STEP_SUMMARY
+          printf '\n%b\n' "retries: \`${retries}\`" >> $GITHUB_STEP_SUMMARY
+
+  iperf_tag:
+    needs: ["scheduled_defaults", "skip_duplicate_job"]
+    if: needs.scheduled_defaults.outputs.skip_new_tag_check == 'false' && needs.skip_duplicate_job.outputs.should_skip != 'true'
+    uses: ./.github/workflows/ci-check-for-new-release-tag.yml
+
+  linux_crossbuild:
+    needs: ["iperf_tag", "scheduled_defaults", "skip_duplicate_job"]
+    if: >
+      always() && !failure() && !cancelled() && needs.skip_duplicate_job.outputs.should_skip != 'true'
+      && needs.scheduled_defaults.outputs.skip_new_tag_check == 'true'
+    permissions:
+      id-token: write
+      attestations: write
+      contents: read
+    uses: ./.github/workflows/ci-linux-crossbuild.yml
+    secrets:
+      VT_API_KEY: ${{ secrets.VT_API_KEY || '' }}
+    with:
+      source_repo: ${{ needs.scheduled_defaults.outputs.source_repo }}
+      source_branch: ${{ needs.iperf_tag.outputs.iperf_tag || needs.scheduled_defaults.outputs.source_branch }}
+
+  release:
+    needs: ["skip_duplicate_job", "scheduled_defaults", "linux_crossbuild"]
+    if: >
+      always() && !failure() && !cancelled() && needs.skip_duplicate_job.outputs.should_skip != 'true'
+      && needs.linux_crossbuild.result == 'success'
+      && needs.scheduled_defaults.outputs.artifacts_only == 'false'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/ci-release.yml
+    with:
+      release_tags: ${{ needs.linux_crossbuild.outputs.release_tags }}
+      test_linux_crossbuild: ${{ needs.linux_crossbuild.result }}
+
+  docker:
+    needs: ["skip_duplicate_job", "scheduled_defaults", "linux_crossbuild", "release"]
+    if: >
+      always() && !failure() && !cancelled() && needs.skip_duplicate_job.outputs.should_skip != 'true'
+      && needs.linux_crossbuild.result == 'success'
+      && needs.scheduled_defaults.outputs.artifacts_only == 'false'
+    permissions:
+      packages: write
+    uses: ./.github/workflows/ci-docker.yml
+
+  rerun_on_failure:
+    needs:
+      [
+        skip_duplicate_job,
+        scheduled_defaults,
+        show_outputs,
+        iperf_tag,
+        linux_crossbuild,
+        release,
+        docker,
+      ]
+    if: >
+      failure() &&
+      ( needs.scheduled_defaults.outputs.skip_rerun == 'false' && needs.skip_duplicate_job.outputs.should_skip != 'true' )
+    concurrency:
+      group: ci-auto-rerun-failed-jobs
+      cancel-in-progress: true
+    permissions:
+      actions: write
+    runs-on: ubuntu-24.04-arm
+    env:
+      GH_TOKEN: "${{ secrets.AUTO_RERUN || github.token }}"
+      github_repo: "" # To use ci-auto-rerun-failed-jobs.yml hosted in a remote repository else default to the current repository. Requires PAT token AUTO_RERUN
+      retries: ${{ github.event.inputs.retries || '1' }}
+      distinct_id: ${{ github.event.inputs.distinct_id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: ci-auto-rerun-failed-jobs via ${{ env.github_repo || github.repository }}
+        run: >
+          gh workflow run ci-auto-rerun-failed-jobs-action.yml
+          --repo "${github_repo:-$GITHUB_REPOSITORY}"
+          -f github_repo=${GITHUB_REPOSITORY}
+          -f run_id=${GITHUB_RUN_ID}
+          -f attempts=${GITHUB_RUN_ATTEMPT}
+          -f retries=${retries}
+          -f distinct_id=${distinct_id}

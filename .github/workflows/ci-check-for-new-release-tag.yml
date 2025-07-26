@@ -1,0 +1,51 @@
+name: ci - check for new iperf release tag
+
+on:
+  workflow_call:
+    outputs:
+      continue_build:
+        value: ${{ jobs.check_release.outputs.continue_build }}
+      iperf_tag:
+        value: ${{ jobs.check_release.outputs.iperf_tag }}
+
+env:
+  GH_TOKEN: "${{ github.TOKEN }}"
+
+jobs:
+  check_release:
+    outputs:
+      continue_build: ${{ steps.continue_build_check.outputs.continue_build_choice }}
+      iperf_tag: ${{ steps.continue_build_check.outputs.iperf_tag }}
+    runs-on: ubuntu-24.04-arm
+
+    steps:
+      # Checkout the code
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Get latest esnet/iperf tag
+        run: printf '%s\n' "upstream_iperf_tag=$(git ls-remote -q -t --refs "https://github.com/esnet/iperf.git" | awk '{sub("refs/tags/", ""); if ($2 ~ /^[0-9]+(\.[0-9]+)*$/) print $2 }' | sort -rV | awk '!/^$/' | head -n 1)" >> $GITHUB_ENV
+
+      - name: Get latest ${{ github.repository }} tag
+        run: printf '%s\n' "local_iperf_tag=$(git ls-remote -q -t --refs "https://github.com/${{ github.repository }}.git" | awk '{sub("refs/tags/", ""); if ($2 ~ /^[0-9]+(\.[0-9]+)*$/) print $2 }' | sort -rV | awk '!/^$/' | head -n 1)" >> $GITHUB_ENV
+
+      - name: Test values - latest upstream vs local tags
+        id: continue_build_check
+        run: |
+          ver() {
+            local test_array
+            read -ra test_array < <(printf "%s" "${@//./ }")
+            printf "%d%03d%03d%03d" "${test_array[@]}"
+          }
+
+          local_iperf_tag="${local_iperf_tag}"
+
+          if [[ "$(ver "${upstream_iperf_tag}")" -gt "$(ver "${local_iperf_tag//+/}")" ]]; then
+            printf "%-14s remote:%-10s local:%-10s %s\n" "$iray" "${upstream_iperf_tag}" "${local_iperf_tag//+/}" "< New version available - workflow will be triggered"
+            printf '%s\n' "continue_build_choice=yes" >> $GITHUB_OUTPUT
+            printf '%s\n' "iperf_tag=${upstream_iperf_tag}" >> $GITHUB_OUTPUT
+          else
+            printf "%-14s remote:%-10s local:%-10s\n" "$iray" "${upstream_iperf_tag}" "${local_iperf_tag//+/}"
+          fi
