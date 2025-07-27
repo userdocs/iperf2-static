@@ -5,7 +5,7 @@
 
 Using GitHub actions and workflows, binaries are verified using GitHub attestation and VirusTotal scanning, at build time, so that you can be certain the release assets you are using were transparently built from the source code.
 
-- GitHub attestation will show where when and how the binary was built - [example](https://github.com/userdocs/iperf2-static/attestations/2474371)
+- GitHub attestation will show where when and how the binary was built - [example](https://github.com/userdocs/iperf2-static/attestations)
 - VirusTotal scanning will show the binary is malware free before release - [example](https://www.virustotal.com/gui/file/42647b55aae08c3b581e78e1a6bcadf2c7715d4edfc2c842ecbb194b0b47b084)
 
 > [!TIP]
