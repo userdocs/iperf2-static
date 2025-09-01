@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-24.04-arm
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           persist-credentials: false
 
@@ -38,7 +38,7 @@ jobs:
           printf '\n%s\n' "test_osx: \`${test_osx}\`" >> $GITHUB_STEP_SUMMARY
 
       - name: Download artifacts
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
           path: "release-artifacts"
           pattern: iperf-*
@@ -71,7 +71,7 @@ jobs:
           done
 
       - name: "Publish release ${{ inputs.release_tags }}"
-        uses: ncipollo/release-action@v1
+        uses: ncipollo/release-action@1c89adf39833729d8f85a31ccbc451b078733c80 # v1.19.1
         with:
           prerelease: false
           artifacts: release-artifacts/iperf-*[!\.url]
