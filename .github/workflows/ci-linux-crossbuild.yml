@@ -64,51 +64,50 @@ jobs:
     env:
       source_repo: ${{ inputs.source_repo }}
       source_branch: ${{ inputs.source_branch }}
-      container_name: cross_builder
+      ws: ${{ github.workspace }}
+      arch: ${{ matrix.arch }}
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           persist-credentials: false
 
       - name: Host - Bootstrap qemu
-        uses: userdocs/actions/qemu@main
+        uses: userdocs/actions/qemu@e8f57bd585c7bb6dcce011694d6772bab657abca # v1.0.7
+        with:
+          target_arch: ${{ matrix.arch }}
 
-      - name: Create docker ${{ env.container_name }} ${{ matrix.arch }} container
-        run: >
-          docker run --name ${container_name} -it -d -w /home/gh -v ${{ github.workspace }}:/home/gh
-          -e "CPPFLAGS=-I/usr/include/fortify"
-          -e "LDFLAGS=-static --static"
-          ghcr.io/userdocs/musl-cross-make:${{ matrix.qbt-musl-cross-make }}
-
-      - name: Run apk update
-        run: docker exec ${container_name} apk update
-
-      - name: Run apk upgrade
-        run: docker exec ${container_name} apk upgrade
+      - name: Host - Bootstrap docker container
+        uses: userdocs/actions/qbt_docker@e8f57bd585c7bb6dcce011694d6772bab657abca # v1.0.7
+        with:
+            os_id: ghcr.io/userdocs/musl-cross-make
+            os_version_id: ${{ matrix.qbt-musl-cross-make }}
+            custom_docker_commands: |
+              -e CPPFLAGS=-I${wd}/local/include -I/usr/include/fortify -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3
+              -e LDFLAGS=-static --static -L${wd}/local/lib -Wl,-O1,--as-needed,--sort-common,-z,nodlopen,-z,noexecstack,-z,now,-z,relro,-z,--no-copy-dt-needed-entries,--build-id
 
       - name: Git clone ${{ matrix.name }}
-        run: docker exec -u gh:gh ${container_name} git clone --no-tags --single-branch --branch "${source_branch}" --shallow-submodules --recurse-submodules -j"$(nproc)" --depth 1 "${source_repo}" /home/gh/${{ matrix.name }}
+        run: docker exec "${container_name}" git clone --no-tags --single-branch --branch "${source_branch}" --shallow-submodules --recurse-submodules -j"$(nproc)" --depth 1 "${source_repo}" ${wd}/${{ matrix.name }}
 
       - name: Configure ${{ matrix.name }}
-        run: docker exec -u gh:gh -w /home/gh/${{ matrix.name }} ${container_name} ./configure --prefix="/home/gh/local"
+        run: docker exec -w "${wd}/${{ matrix.name }}" "${container_name}" ./configure --prefix="${wd}/local"
 
       - name: Make Build ${{ matrix.name }}
-        run: docker exec -u gh:gh -w /home/gh/${{ matrix.name }} ${container_name} make -j$(nproc)
+        run: docker exec -w "${wd}/${{ matrix.name }}" "${container_name}" make -j$(nproc)
 
       - name: Make Install Build ${{ matrix.name }}
-        run: docker exec -u gh:gh -w /home/gh/${{ matrix.name }} ${container_name} make install
+        run: docker exec -w "${wd}/${{ matrix.name }}" "${container_name}" make install
 
       - name: Rename ${{ matrix.name }} to ${{ matrix.name }}-${{ matrix.release_name }}
-        run: docker exec -u gh:gh ${container_name} mv -f /home/gh/local/bin/${{ matrix.name }} /home/gh/${{ matrix.name }}-${{ matrix.release_name }}
+        run: docker exec "${container_name}" mv -f "${wd}/local/bin/${{ matrix.name }}" "${wd}/${{ matrix.name }}-${{ matrix.release_name }}"
 
       - name: Create path to binary env
         run: printf '%s\n' "binary_path=${{ github.workspace }}/${{ matrix.name }}-${{ matrix.release_name }}" >> $GITHUB_ENV
 
       - name: VirusTotal Scan
         id: virustotal
-        uses: crazy-max/ghaction-virustotal@v4
+        uses: crazy-max/ghaction-virustotal@d34968c958ae283fe976efed637081b9f9dcf74f # v4.2.0
         with:
           vt_api_key: ${{ secrets.VT_API_KEY }}
           files: ${{ env.binary_path }}
@@ -126,12 +125,12 @@ jobs:
         run: printf '%s\n' "release_tag=${release_tag}" >> "$GITHUB_OUTPUT"
 
       - name: Generate artifact attestation
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3.0.0
         with:
           subject-path: ${{ env.binary_path }}
 
       - name: "Create artifact"
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ${{ matrix.name }}-${{ matrix.release_name }}
           path: |
