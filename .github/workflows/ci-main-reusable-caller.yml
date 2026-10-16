@@ -43,7 +43,7 @@ env:
 
 jobs:
   skip_duplicate_job:
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     permissions:
       actions: write
       contents: read
@@ -61,7 +61,7 @@ jobs:
   scheduled_defaults:
     if: needs.skip_duplicate_job.outputs.should_skip != 'true'
     needs: skip_duplicate_job
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     permissions:
       contents: read
     outputs:
@@ -86,7 +86,7 @@ jobs:
   show_outputs:
     needs: ["skip_duplicate_job", "scheduled_defaults"]
     if: needs.skip_duplicate_job.outputs.should_skip != 'true'
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     env:
       source_repo: ${{ needs.scheduled_defaults.outputs.source_repo }}
       source_branch: ${{ needs.scheduled_defaults.outputs.source_branch }}
@@ -170,7 +170,7 @@ jobs:
       cancel-in-progress: true
     permissions:
       actions: write
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     env:
       GH_TOKEN: "${{ secrets.AUTO_RERUN || github.token }}"
       github_repo: "" # To use ci-auto-rerun-failed-jobs.yml hosted in a remote repository else default to the current repository. Requires PAT token AUTO_RERUN
